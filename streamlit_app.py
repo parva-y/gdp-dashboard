@@ -121,28 +121,28 @@ def calculate_cohort_metrics(df, cohort):
         incremental_transactors = ((test_total_transactors*100/70) - (control_total_transactors*100/30))
         
         # Calculate percentage lifts
-        if control_total_gmv > 0:
+        if control_total_gmv > 0 and control_df_filtered['audience_size'].sum() > 0 and test_df_filtered['audience_size'].sum() > 0:
             gmv_lift_percent = ((test_total_gmv/test_df_filtered['audience_size'].sum()) - 
                                (control_total_gmv/control_df_filtered['audience_size'].sum())) / \
                                (control_total_gmv/control_df_filtered['audience_size'].sum()) * 100
         else:
             gmv_lift_percent = 0
             
-        if control_total_app_opens > 0:
+        if control_total_app_opens > 0 and control_df_filtered['audience_size'].sum() > 0 and test_df_filtered['audience_size'].sum() > 0:
             app_opens_lift_percent = ((test_total_app_opens/test_df_filtered['audience_size'].sum()) - 
                                      (control_total_app_opens/control_df_filtered['audience_size'].sum())) / \
                                      (control_total_app_opens/control_df_filtered['audience_size'].sum()) * 100
         else:
             app_opens_lift_percent = 0
             
-        if control_total_orders > 0:
+        if control_total_orders > 0 and control_df_filtered['audience_size'].sum() > 0 and test_df_filtered['audience_size'].sum() > 0:
             orders_lift_percent = ((test_total_orders/test_df_filtered['audience_size'].sum()) - 
                                   (control_total_orders/control_df_filtered['audience_size'].sum())) / \
                                   (control_total_orders/control_df_filtered['audience_size'].sum()) * 100
         else:
             orders_lift_percent = 0
             
-        if control_total_transactors > 0:
+        if control_total_transactors > 0 and control_df_filtered['audience_size'].sum() > 0 and test_df_filtered['audience_size'].sum() > 0:
             transactors_lift_percent = ((test_total_transactors/test_df_filtered['audience_size'].sum()) - 
                                       (control_total_transactors/control_df_filtered['audience_size'].sum())) / \
                                       (control_total_transactors/control_df_filtered['audience_size'].sum()) * 100
@@ -218,16 +218,8 @@ for cohort, test_groups_metrics in metrics_summary.items():
 if summary_rows:
     summary_df = pd.DataFrame(summary_rows)
     
-    # Add styling to highlight positive values
-    def style_positive_values(val):
-        if isinstance(val, (int, float)):
-            if 'Lift' in val.name and val > 0:
-                return 'color: green; font-weight: bold'
-            elif 'Incremental' in val.name and val > 0:
-                return 'color: green; font-weight: bold'
-        return ''
-    
-    st.dataframe(summary_df.style.applymap(style_positive_values))
+    # Just display the dataframe without applying style
+    st.dataframe(summary_df)
     
     # Create visualizations
     st.write("## 📊 Visual Impact Analysis")
@@ -259,33 +251,35 @@ if summary_rows:
     st.write("## 📈 Annual Projections")
     
     # Calculate annualized impact (multiplying by 365/test_days)
+    annual_rows = []
+    total_annual_gmv = 0
+    
     for row in summary_rows:
         days = row['Test Duration (Days)']
         if days > 0:
             annual_multiplier = 365 / days
-            row['Annual Projected GMV (₹)'] = row['Incremental GMV (₹)'] * annual_multiplier
-            row['Annual Projected App Opens'] = row['Incremental App Opens'] * annual_multiplier
-            row['Annual Projected Orders'] = row['Incremental Orders'] * annual_multiplier
-            row['Annual Projected Transactors'] = row['Incremental Transactors'] * annual_multiplier
+            annual_projected_gmv = row['Incremental GMV (₹)'] * annual_multiplier
+            annual_projected_app_opens = row['Incremental App Opens'] * annual_multiplier
+            annual_projected_orders = row['Incremental Orders'] * annual_multiplier
+            annual_projected_transactors = row['Incremental Transactors'] * annual_multiplier
+            
+            total_annual_gmv += annual_projected_gmv
+            
+            annual_rows.append({
+                'Cohort': row['Cohort'],
+                'Test Group': row['Test Group'],
+                'Annual Projected GMV (₹)': round(annual_projected_gmv, 2),
+                'Annual Projected App Opens': int(annual_projected_app_opens),
+                'Annual Projected Orders': int(annual_projected_orders),
+                'Annual Projected Transactors': int(annual_projected_transactors)
+            })
     
-    annual_df = pd.DataFrame(summary_rows)[['Cohort', 'Test Group', 'Annual Projected GMV (₹)', 
-                                           'Annual Projected App Opens', 'Annual Projected Orders',
-                                           'Annual Projected Transactors']]
-    
-    # Format numbers for better readability
-    for col in annual_df.columns:
-        if 'GMV' in col:
-            annual_df[col] = annual_df[col].apply(lambda x: f"₹{x:,.2f}" if pd.notnull(x) else x)
-        elif any(metric in col for metric in ['Opens', 'Orders', 'Transactors']):
-            annual_df[col] = annual_df[col].apply(lambda x: f"{int(x):,}" if pd.notnull(x) else x)
-    
-    st.dataframe(annual_df)
-    
-    # Total impact across all cohorts
-    total_annual_gmv = sum([row['Incremental GMV (₹)'] * (365 / row['Test Duration (Days)']) 
-                             for row in summary_rows if row['Test Duration (Days)'] > 0])
-    
-    st.metric("Total Annual Projected Incremental GMV", f"₹{total_annual_gmv:,.2f}")
+    if annual_rows:
+        annual_df = pd.DataFrame(annual_rows)
+        st.dataframe(annual_df)
+        
+        # Total impact across all cohorts
+        st.metric("Total Annual Projected Incremental GMV", f"₹{total_annual_gmv:,.2f}")
     
     # ROI calculation if we have campaign cost data
     st.write("## 💰 Return on Investment")
@@ -340,27 +334,27 @@ if has_recency_data and selected_cohort != "All Cohorts" and selected_recency ==
         # Create heatmap for lift by recency segment
         for metric in ['GMV Lift (%)', 'App Opens Lift (%)', 'Orders Lift (%)', 'Transactors Lift (%)']:
             # Reshape data for heatmap
-            heatmap_data = recency_df.pivot(index='Recency', columns='Test Group', values=metric)
-            
-            # Create heatmap
-            fig = go.Figure(data=go.Heatmap(
-                z=heatmap_data.values,
-                x=heatmap_data.columns,
-                y=heatmap_data.index,
-                colorscale='RdBu_r',
-                zmid=0,  # Center colorscale at zero
-                text=[[f"{val:.2f}%" for val in row] for row in heatmap_data.values],
-                texttemplate="%{text}",
-                textfont={"size":12}
-            ))
-            
-            fig.update_layout(
-                title=f"{metric} by Recency Segment",
-                xaxis_title="Test Group",
-                yaxis_title="Recency"
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
+            pivot_df = recency_df.pivot(index='Recency', columns='Test Group', values=metric)
+            if not pivot_df.empty:
+                # Create heatmap
+                fig = go.Figure(data=go.Heatmap(
+                    z=pivot_df.values,
+                    x=pivot_df.columns,
+                    y=pivot_df.index,
+                    colorscale='RdBu_r',
+                    zmid=0,  # Center colorscale at zero
+                    text=[[f"{val:.2f}%" for val in row] for row in pivot_df.values],
+                    texttemplate="%{text}",
+                    textfont={"size":12}
+                ))
+                
+                fig.update_layout(
+                    title=f"{metric} by Recency Segment",
+                    xaxis_title="Test Group",
+                    yaxis_title="Recency"
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
 
 # Download button for CSV export
 csv = None
@@ -386,22 +380,26 @@ if 'summary_df' in locals() and not summary_df.empty:
     avg_opens_lift = summary_df['App Opens Lift (%)'].mean()
     
     # Find best performing cohort
-    best_cohort_idx = summary_df['GMV Lift (%)'].idxmax()
-    best_cohort = summary_df.loc[best_cohort_idx, 'Cohort']
-    best_cohort_lift = summary_df.loc[best_cohort_idx, 'GMV Lift (%)']
-    
-    # Generate executive summary
-    st.markdown(f"""
-    Based on our experiment results, we have successfully demonstrated significant positive impact:
-    
-    - **Total Incremental GMV**: ₹{total_inc_gmv:,.2f}
-    - **Average GMV Lift**: {avg_gmv_lift:.2f}%
-    - **Total Incremental App Opens**: {total_inc_opens:,}
-    - **Average App Opens Lift**: {avg_opens_lift:.2f}%
-    
-    The **{best_cohort}** cohort showed the strongest performance with a GMV lift of **{best_cohort_lift:.2f}%**.
-    
-    If projected annually, this initiative could generate approximately **₹{total_annual_gmv:,.2f}** in incremental GMV.
-    """)
-else:
-    st.write("No data available for generating an executive summary based on current selections.")
+    if len(summary_df) > 0:
+        best_cohort_idx = summary_df['GMV Lift (%)'].idxmax()
+        if best_cohort_idx is not None:
+            best_cohort = summary_df.loc[best_cohort_idx, 'Cohort']
+            best_cohort_lift = summary_df.loc[best_cohort_idx, 'GMV Lift (%)']
+            
+            # Generate executive summary
+            st.markdown(f"""
+            Based on our experiment results, we have successfully demonstrated significant positive impact:
+            
+            - **Total Incremental GMV**: ₹{total_inc_gmv:,.2f}
+            - **Average GMV Lift**: {avg_gmv_lift:.2f}%
+            - **Total Incremental App Opens**: {total_inc_opens:,}
+            - **Average App Opens Lift**: {avg_opens_lift:.2f}%
+            
+            The **{best_cohort}** cohort showed the strongest performance with a GMV lift of **{best_cohort_lift:.2f}%**.
+            
+            If projected annually, this initiative could generate approximately **₹{total_annual_gmv:,.2f}** in incremental GMV.
+            """)
+        else:
+            st.write("No best cohort found in the data.")
+    else:
+        st.write("No data available for generating an executive summary based on current selections.")
